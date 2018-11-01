@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: ECS Service and Task Definition for OMT Node
+
+Parameters:
+  RuntimeEnvironment:
+    Type: String
+    Description: Unique identifier for the deployment
+  EcsServiceRole:
+    Type: String
+    Description: The IAM role that the docker containers will use
+  RedbookImageRepository:
+    Type: String
+    Description: The repository to fetch the docker images from
+  OMTDockerImage:
+    Type: String
+    Description: The image to fetch
+  OMTDockerTag:
+    Type: String
+    Description: The tag to fetch
+  NumberOfOMTNodes:
+    Type: Number
+    Description: The number of OMT nodes to creates as part of the cluster
+  OMTDatabaseHost:
+    Type: String
+    Description: Database Connection Details
+  OMTRedisHost:
+    Type: String
+    Description: The DNS name of the Redis private NLB
+  OMTDbUsername:
+    Type: String
+    Description: Database Connection Details
+  OMTDbPassword:
+    Type: String
+    Description: Database Connection Details
+  OMTSpringProfilesActive:
+    Type: String
+    Description: Spring profile active
+  OMTTargetGroup:
+    Type: String
+    Description: Target group for OMT
+  TamaleConsumerToken:
+    Type: String
+    Description: Token to connect to tamale
+  TamaleRabbitMQHost:
+    Type: String
+    Description: Tamale Host
+  TamaleRabbitMQUser:
+    Type: String
+    Description: Tamale RabbitMQ user
+  TamaleRabbitMQPassword:
+    Type: String
+    Description: Tamale RabbitMQ password
+  NewRelicLicenseKey:
+    Type: String
+    Description: NewRelic license
+  NewRelicAppName:
+    Type: String
+    Description: NewRelic App name
+
+Resources:
+  OMTLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+
+  OMTTask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+        - Name: OMT
+          Image: !Sub ${RedbookImageRepository}/${OMTDockerImage}:${OMTDockerTag}
+          Memory: 1024
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+          Environment:
+            - Name: DATABASE_HOST
+              Value: !Ref OMTDatabaseHost
+            - Name: SPRING_DATASOURCE_USERNAME
+              Value: !Ref OMTDbUsername
+            - Name: SPRING_DATASOURCE_PASSWORD
+              Value: !Ref OMTDbPassword
+            - Name: SPRING_PROFILES_ACTIVE
+              Value: !Ref OMTSpringProfilesActive
+            - Name: SPRING_DATASOURCE_URL
+              Value: !Sub jdbc:mysql://${OMTDatabaseHost}:3306/offermanagement?useSSL=false
+            - Name: DATASOURCE_FLYWAY_URL
+              Value: !Sub jdbc:mysql://${OMTDatabaseHost}:3306/offermanagement?useSSL=false
+            - Name: DATASOURCE_FLYWAY_USERNAME
+              Value: !Ref OMTDbUsername
+            - Name: DATASOURCE_FLYWAY_PASSWORD
+              Value: !Ref OMTDbPassword
+            - Name: TAMALE_CLIENT_RABBITMQ_TOKEN
+              Value: !Ref TamaleConsumerToken
+            - Name: TAMALE_CLIENT_RABBITMQ_HOST
+              Value: !Ref TamaleRabbitMQHost
+            - Name: TAMALE_CLIENT_RABBITMQ_USER
+              Value: !Ref TamaleRabbitMQUser
+            - Name: TAMALE_CLIENT_RABBITMQ_PASSWORD
+              Value: !Ref TamaleRabbitMQPassword
+            - Name: MAILMAN_AUTHENTICATION_REDIS_HOST
+              Value: !Ref OMTRedisHost
+            - Name: NEWRELICLICENSEKEY
+              Value: !Ref NewRelicLicenseKey
+            - Name: NEWRELICAPPNAME
+              Value: !Ref NewRelicAppName
+
+  OMTService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: OMT-APIV1 #this service name needs to be changed to update this resource
+      TaskDefinition: !Ref OMTTask
+      DesiredCount: !Ref NumberOfOMTNodes
+      DeploymentConfiguration:
+        MaximumPercent: 150
+        MinimumHealthyPercent: 100
+      Cluster: !Sub ${RuntimeEnvironment}-OMTEcsClusterStatic
+      Role: !Ref EcsServiceRole
+      LoadBalancers:
+        - TargetGroupArn: !Ref OMTTargetGroup
+          ContainerPort: 8080
+          ContainerName: OMT

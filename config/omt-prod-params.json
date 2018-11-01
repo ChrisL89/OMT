@@ -1,0 +1,126 @@
+[
+  {
+    "ParameterKey": "VpcId",
+    "ParameterValue": "vpc-e7330c82"
+  },
+  {
+    "ParameterKey": "PrivateSubnets",
+    "ParameterValue": "subnet-1a33d27e,subnet-cf7c75b8"
+  },
+  {
+    "ParameterKey": "InternalLoadBalancerSubnets",
+    "ParameterValue": "subnet-e133d285,subnet-c67c75b1"
+  },
+  {
+    "ParameterKey": "DigitalSG",
+    "ParameterValue": "sg-bcb090d8"
+  },
+  {
+    "ParameterKey": "RuntimeEnvironment",
+    "ParameterValue": "prod-omt"
+  },
+  {
+    "ParameterKey": "OMTDbSize",
+    "ParameterValue": "5"
+  },
+  {
+    "ParameterKey": "OMTDbInstanceClass",
+    "ParameterValue": "db.t2.medium"
+  },
+  {
+    "ParameterKey": "OMTDbUsername",
+    "ParameterValue": "omtapi"
+  },
+  {
+    "ParameterKey": "OMTDbPassword",
+    "ParameterValue": "omt-secret"
+  },
+  {
+    "ParameterKey": "EcsClusterTagSchedule",
+    "ParameterValue": "Start=07:00|mon-fri;Stop=20:00|mon-fri;Override=on"
+  },
+  {
+    "ParameterKey": "DockerRegistryAuth",
+    "ParameterValue": "AQICAHjNe/aZ3tyHwi9v6JSGwlwKMdyiY4CqmYYsDzPBqtxvDgHtvWWS7p/AB8RF0vYbInDEAAABIjCCAR4GCSqGSIb3DQEHBqCCAQ8wggELAgEAMIIBBAYJKoZIhvcNAQcBMB4GCWCGSAFlAwQBLjARBAz17gzZ4ZASTVRLbPQCARCAgdY2QLwSSeowDtwQdcAHClR1NSm66h9M+a+sPc1RjIX4n2KMOLaK8Mxa7yIfaqXOcDRiabYELOxjmuoXE8yBViVRXOSiFwLL/Q6x0hUoYWTIDHrNEkMMoZVYX3PBWTTnUjRaojZzL8kbTZEp1HkrJKJY3KAdQcHjRGSo9IjIsmctl4pYX9phCVAOsXePBi2JFnD5mwy0YgsIRS45R4ArfinyPvEfgUuh38VsYGzHx25/kmaPdX0srQeGJJoGhtXmouCc5DKUP4nCGpejD0jvpvYRyUuzoOD6"
+  },
+  {
+    "ParameterKey": "NewRelicAppName",
+    "ParameterValue": "Casino Offer Management (Production)"
+  },
+  {
+    "ParameterKey": "NewRelicLicenseKey",
+    "ParameterValue": "411e53780993d359d024a3daf0d5e41ff56d8ea1"
+  },
+  {
+    "ParameterKey": "EcsInstanceType",
+    "ParameterValue": "c4.xlarge"
+  },
+  {
+    "ParameterKey": "KeyName",
+    "ParameterValue": "luxbet-pr-aws"
+  },
+  {
+    "ParameterKey": "NumberOfClusterMembers",
+    "ParameterValue": "2"
+  },
+  {
+    "ParameterKey": "EcsInstanceRole",
+    "ParameterValue": "Jenken-Automation"
+  },
+  {
+    "ParameterKey": "RedbookImageRepository",
+    "ParameterValue": "redbook-docker-prod.artifacts.tabdigital.com.au"
+  },
+  {
+    "ParameterKey": "OMTDockerTag",
+    "ParameterValue": "1.0-1524544207990"
+  },
+  {
+    "ParameterKey": "OMTDockerImage",
+    "ParameterValue": "offer-management"
+  },
+  {
+    "ParameterKey": "OMTRedisDockerImageAndTag",
+    "ParameterValue": "redis:3-alpine"
+  },
+  {
+    "ParameterKey": "EcsServiceRole",
+    "ParameterValue": "ecsService"
+  },
+  {
+    "ParameterKey": "OfficeDataCentreSG",
+    "ParameterValue": "sg-bfb090db"
+  },
+  {
+    "ParameterKey": "SSLCertificateARN",
+    "ParameterValue": "arn:aws:iam::373189511395:server-certificate/wildcard.luxaws.com-2.crt"
+  },
+  {
+    "ParameterKey": "NumberOfOMTNodes",
+    "ParameterValue": "2"
+  },
+  {
+    "ParameterKey": "OMTSpringProfilesActive",
+    "ParameterValue": "prod"
+  },
+  {
+    "ParameterKey": "TamaleConsumerToken",
+    "ParameterValue": "0470be162633dea40c14135fbe91def4"
+  },
+  {
+    "ParameterKey": "TamaleRabbitMQHost",
+    "ParameterValue": "production-tamale.sunprod.in.cld"
+  },
+  {
+    "ParameterKey": "TamaleRabbitMQUser",
+    "ParameterValue": "digital_user"
+  },
+  {
+    "ParameterKey": "TamaleRabbitMQPassword",
+    "ParameterValue": "digital_password"
+  },
+  {
+    "ParameterKey": "Route53LambdaFunctionArn",
+    "ParameterValue": "arn:aws:lambda:eu-west-1:373189511395:function:R53LUXAWSCOM-SharedServicesR53-1Q6OY4VUN7WXC"
+  }
+]

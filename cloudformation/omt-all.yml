@@ -1,0 +1,232 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: Core Cloudformation Stack for OMT
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: VPC to deploy the Wageplayer Stack into
+  DigitalSG:
+    Description: Security group for Digital to access OMT
+    Type: String
+  PrivateSubnets:
+    Description: Private subnets for the ECS Cluster Autoscaling Group
+    Type: String
+  InternalLoadBalancerSubnets:
+    Description: Private subnets for the ECS Cluster Autoscaling Group
+    Type: String
+  OfficeDataCentreSG:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security Group for Office and Data Centre Access
+  SSLCertificateARN:
+    Type: String
+    Description: ARN For SSL Certificate used on WP Load Balancer
+  EcsInstanceRole:
+    Type: String
+    Description: The IAM role that the docker container host instance will use
+    Default: Jenken-Automation
+  EcsServiceRole:
+    Type: String
+    Description: The IAM role that the docker containers will use
+  RuntimeEnvironment:
+    Type: String
+    Description: The runtime environment config tag
+    Default: ppw
+  EcsClusterTagSchedule:
+    Type: String
+    Description: Availability schedule tag to configure on the ECS cluster members
+    Default: Start=07:00|mon-fri;Stop=20:00|mon-fri;Override=onS
+  EcsInstanceType:
+    Type: String
+    Description: The EC2 instance type for the host
+    Default: c3.xlarge
+  EcsInstanceRole:
+    Type: String
+    Description: The IAM role that the docker container host instance will use
+    Default: Jenken-Automation
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: For SSH Access
+    Default: eng-wagering-dev
+  NumberOfClusterMembers:
+    Type: Number
+    Description: Number of the ECS Cluster Members
+    Default: 3
+  DockerRegistryAuth:
+    Description: "Docker config.json auth section '{host: {auth: secret}}' encrypted by KMS"
+    Type: String
+  NewRelicLicenseKey:
+    Type: String
+    Description: NewRelic license
+  RedbookImageRepository:
+    Type: String
+    Description: The name of the Docker repository
+  OMTDockerImage:
+    Type: String
+    Description: The image to fetch
+  OMTDockerTag:
+    Type: String
+    Description: The tag to fetch
+  OMTRedisDockerImageAndTag:
+    Type: String
+    Description: The OMT Redis image to fetch
+  OMTDbSize:
+    Default: 5
+    Type: Number
+    Description: The size of the OMT database
+    MinValue: 5
+    MaxValue: 6144
+    ConstraintDescription: Must be between 5 and 6144
+  OMTDbInstanceClass:
+    Type: String
+    Description: Instance class for the OMT RDS
+    AllowedValues:
+      - db.t2.small
+      - db.t2.medium
+      - db.t2.large
+      - db.m4.large
+      - db.m4.4xlarge
+      - db.r3.large
+      - db.r3.4xlarge
+    Default: db.t2.medium
+  OMTDbUsername:
+    Type: String
+    Description: OMT RDS database username
+  OMTDbPassword:
+    Type: String
+    NoEcho: true
+    Description: OMT RDS database password
+    MinLength: 8
+  NumberOfOMTNodes:
+    Type: Number
+    Description: The number of OMT nodes to creates as part of the cluster
+  OMTSpringProfilesActive:
+    Type: String
+    Description: Spring profile active
+  TamaleConsumerToken:
+    Type: String
+    Description: Token to connect to tamale
+  TamaleRabbitMQHost:
+    Type: String
+    Description: Tamale Host
+  TamaleRabbitMQUser:
+    Type: String
+    Description: Tamale RabbitMQ user
+  TamaleRabbitMQPassword:
+    Type: String
+    Description: Tamale RabbitMQ password
+  NumberOfOMTRedisNodes:
+    Type: Number
+    Description: The number of OMT Redis nodes to creates as part of the cluster
+    Default: 1
+  Route53ZoneDomain:
+    Description: Route53 Domain name for alias
+    Type: String
+    Default: luxaws.com
+  Route53LambdaFunctionArn:
+    Description: Route53 Lamda funciton service token
+    Type: String
+    Default: arn:aws:lambda:eu-west-1:710133385430:function:R53LUXAWSCOM-SharedServicesR53-FUZNCDSO319V
+  NewRelicAppName:
+    Type: String
+    Description: NewRelic App name
+
+Mappings:
+  RegionalConfiguration:
+    ap-southeast-2:
+      EcsAmi: ami-ac5849cf
+      ElbAccountId: 783225319266
+    eu-west-1:
+      EcsAmi: ami-5ae4f83c
+      ElbAccountId: 156460612806
+
+Resources:
+  OMTDatabase:
+    DependsOn: OMTShared
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: omt-database.yml
+      Parameters:
+        RuntimeEnvironment: !Ref RuntimeEnvironment
+        PrivateSubnets: !Ref PrivateSubnets
+        EcsClusterTagSchedule: !Ref EcsClusterTagSchedule
+        OMTDbSize: !Ref OMTDbSize
+        OMTDbInstanceClass: !Ref OMTDbInstanceClass
+        OMTDbUsername: !Ref OMTDbUsername
+        OMTDbPassword: !Ref OMTDbPassword
+        OfficeDataCentreSG: !Ref OfficeDataCentreSG
+        Route53LambdaFunctionArn: !Ref Route53LambdaFunctionArn
+        Route53ZoneDomain: !Ref Route53ZoneDomain
+  OMTEcsClusterStatic:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: OMTShared
+    Properties:
+      TemplateURL: omt-ecs-cluster.yml
+      Parameters:
+        ClusterName: !Sub ${RuntimeEnvironment}-OMTEcsClusterStatic
+        RuntimeEnvironment: !Ref RuntimeEnvironment
+        PrivateSubnets: !Ref PrivateSubnets
+        EcsAmi: !FindInMap [ RegionalConfiguration, !Ref "AWS::Region", EcsAmi ]
+        EcsInstanceRole: !Ref EcsInstanceRole
+        EcsInstanceType: !Ref EcsInstanceType
+        EcsClusterTagSchedule: !Ref EcsClusterTagSchedule
+        RedbookImageRepository: !Ref RedbookImageRepository
+        KeyName: !Ref KeyName
+        DockerRegistryAuth: !Ref DockerRegistryAuth
+        NumberOfClusterMembers: !Ref NumberOfClusterMembers
+        NewRelicLicenseKey: !Ref NewRelicLicenseKey
+  OMTRedisService:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - OMTShared
+      - OMTEcsClusterStatic
+    Properties:
+      TemplateURL: omt-redis-service.yml
+      Parameters:
+        RuntimeEnvironment: !Ref RuntimeEnvironment
+        EcsServiceRole: !Ref EcsServiceRole
+        RedbookImageRepository: !Ref RedbookImageRepository
+        OMTRedisDockerImageAndTag: !Ref OMTRedisDockerImageAndTag
+        NumberOfOMTRedisNodes: !Ref NumberOfOMTRedisNodes
+        PrivateRedisLoadBalancer: !GetAtt OMTShared.Outputs.PrivateRedisLoadBalancer
+  OMTService:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - OMTShared
+      - OMTEcsClusterStatic
+      - OMTDatabase
+      - OMTRedisService
+    Properties:
+      TemplateURL: omt-service.yml
+      Parameters:
+        RuntimeEnvironment: !Ref RuntimeEnvironment
+        EcsServiceRole: !Ref EcsServiceRole
+        RedbookImageRepository: !Ref RedbookImageRepository
+        OMTDockerImage: !Ref OMTDockerImage
+        OMTDockerTag: !Ref OMTDockerTag
+        NumberOfOMTNodes: !Ref NumberOfOMTNodes
+        OMTSpringProfilesActive: !Ref OMTSpringProfilesActive
+        OMTTargetGroup: !GetAtt OMTShared.Outputs.OMTTargetGroup
+        OMTDatabaseHost: !GetAtt  OMTDatabase.Outputs.MySQLEndpoint
+        OMTDbUsername: !Ref  OMTDbUsername
+        OMTDbPassword: !Ref  OMTDbPassword
+        TamaleConsumerToken: !Ref TamaleConsumerToken
+        TamaleRabbitMQHost: !Ref TamaleRabbitMQHost
+        TamaleRabbitMQUser: !Ref TamaleRabbitMQUser
+        TamaleRabbitMQPassword: !Ref TamaleRabbitMQPassword
+        OMTRedisHost: !GetAtt OMTShared.Outputs.OMTRedisHost
+        NewRelicLicenseKey: !Ref NewRelicLicenseKey
+        NewRelicAppName: !Ref NewRelicAppName
+  OMTShared:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: omt-shared.yml
+      Parameters:
+        VpcId: !Ref VpcId
+        RuntimeEnvironment: !Ref RuntimeEnvironment
+        OfficeDataCentreSG: !Ref OfficeDataCentreSG
+        SSLCertificateARN: !Ref SSLCertificateARN
+        DigitalSG: !Ref DigitalSG
+        PrivateSubnets: !Ref PrivateSubnets
+        InternalLoadBalancerSubnets: !Ref InternalLoadBalancerSubnets
+        Route53LambdaFunctionArn: !Ref Route53LambdaFunctionArn

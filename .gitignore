@@ -1,0 +1,12 @@
+.idea/
+.DS_Store
+.data/
+docker-data/
+out/
+src/.DS_Store
+src/main/.DS_Store
+src/main/java/META-INF/
+src/main/resources/.DS_Store
+src/main/resources/db/.DS_Store
+target/
+omt-all-packaged.yml

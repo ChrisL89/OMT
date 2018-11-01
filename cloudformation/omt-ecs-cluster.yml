@@ -1,0 +1,309 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: Base template for creating an ECS Cluster for Offer Management
+
+Parameters:
+  ClusterName:
+    Type: String
+    Description: The name of the ECS Cluster
+  RuntimeEnvironment:
+    Type: String
+    Description: The runtime environment config tag
+    Default: ppw
+  PrivateSubnets:
+    Description: Private subnets for the ECS Cluster Autoscaling Group
+    Type: List<String>
+    ConstraintDescription : must be a list of valid subnets for the selected Virtual Private Cloud
+  EcsAmi:
+    Type: String
+    Description: AMI for ECS cluster members
+  EcsInstanceRole:
+    Type: String
+    Description: The IAM role that the docker container host instance will use
+    Default: Jenken-Automation
+  EcsInstanceType:
+    Type: String
+    Description: The EC2 instance type for the host
+    Default: c3.xlarge
+  EcsClusterTagSchedule:
+    Type: String
+    Description: Availability schedule tag to configure on the ECS cluster members
+    Default: Start=07:00|mon-fri;Stop=20:00|mon-fri;Override=on
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: For SSH Access
+    Default: eng-wagering-dev
+  DockerRegistryAuth:
+    Description: "Docker config.json auth section '{host: {auth: secret}}' encrypted by KMS"
+    Type: String
+  NumberOfClusterMembers:
+    Type: Number
+    Description: Number of the ECS Cluster Members
+    Default: 3
+  RedbookImageRepository:
+    Type: String
+    Description: The name of the Docker repository
+  LogLabels:
+    Type: String
+    Description: Log labels to detect and forward to fluentd
+    Default: com.amazonaws.ecs.cluster,com.amazonaws.ecs.container-name,com.amazonaws.ecs.task-arn,com.amazonaws.ecs.task-definition-family,com.amazonaws.ecs.task-definition-version,au.com.tabcorp.logformat.stdout,au.com.tabcorp.container-name,au.com.tabcorp.repository.name,au.com.tabcorp.container-name,au.com.tabcorp.repository.branch,au.com.tabcorp.repository.commit.full,au.com.tabcorp.repository.commit.short,build.number,build.name,au.com.tabcorp.logformat.stderr
+  NewRelicLicenseKey:
+    Type: String
+    Description: NewRelic license
+
+
+Resources:
+
+  OMTEcsInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    DeletionPolicy: Retain
+    Properties:
+      Roles:
+        - !Ref EcsInstanceRole
+
+  OMTEcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ClusterName
+
+  OMTEcsLaunchConfiguration:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      ImageId: !Ref EcsAmi
+      InstanceType: !Ref EcsInstanceType
+      InstanceMonitoring: true
+      IamInstanceProfile: !Ref OMTEcsInstanceProfile
+      KeyName: !Ref KeyName
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvdcz
+          Ebs:
+            VolumeSize: 100
+            VolumeType: gp2
+      SecurityGroups:
+        - Fn::ImportValue:
+            !Sub ${RuntimeEnvironment}-OMTEcsClusterSG
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #cloud-config
+              write_files:
+                - content: |
+                    ECS_CLUSTER=${OMTEcsCluster}
+                    ECS_ENGINE_AUTH_TYPE=dockercfg
+                    ECS_ENGINE_TASK_CLEANUP_WAIT_DURATION=30m
+                    ECS_AVAILABLE_LOGGING_DRIVERS=["json-file", "fluentd", "awslogs"]
+                    ECS_LOGLEVEL=warn
+                  path: /etc/ecs/ecs.config
+                - content: |
+                    DAEMON_MAXFILES=1048576
+                    DAEMON_PIDFILE_TIMEOUT=10
+                    OPTIONS="$OPTIONS --log-driver fluentd --log-opt fluentd-address=localhost:24224 --log-opt tag="docker.{{.ImageName}}" --log-opt labels=${LogLabels} --log-opt fluentd-async-connect=true"
+                  path: /etc/sysconfig/docker
+                - content: |
+                    license_key=${NewRelicLicenseKey}
+                    loglevel=info
+                    logfile=/var/log/newrelic/nrsysmond.log
+                    labels=StackName:${RuntimeEnvironment};AccountId:${AWS::AccountId};Region:${AWS::Region}
+                  path: /etc/newrelic/nrsysmond.cfg
+                  # Apply LogRotation Policy to the ECS Containers to prevent docker log files (/var/log/docker) consuming all the space on root parition
+                - content: |
+                    /var/log/docker {
+                    rotate 5
+                    copytruncate
+                    missingok
+                    notifempty
+                    compress
+                    maxsize 200M
+                    dateext
+                    dateformat -%Y%m%d-%s
+                    create 0644 root root
+                    }
+                  path: /etc/logrotate.d/docker
+                - content: |
+                    /usr/sbin/logrotate /etc/logrotate.conf
+                  path: /etc/cron.hourly/logrotate
+
+                # Init Script for FluentD
+                - content: |
+                    #!/bin/bash
+
+                    ### BEGIN INIT INFO
+                    # Provides: monitoring-services
+                    # Required-Start: $local_fs docker
+                    # Required-Stop: $local_fs docker
+                    # Default-Start:  2345
+                    # Default-Stop: 90
+                    # Short-Description: run fluentd and statsd containers
+                    # Description: fluentd-kinesis will collect docker logs and send them to Kinesis
+                    ### END INIT INFO
+
+                    lockfile=/var/lock/subsys/monitoring-services
+                    . /etc/rc.d/init.d/functions
+
+                    [ -f /etc/sysconfig/monitoring-services ] && . /etc/sysconfig/monitoring-services
+
+                    start() {
+                      echo "Starting fluentd-kinesis container..."
+                      /usr/bin/docker run \
+                        --name="fluentd-kinesis" \
+                        --net=host \
+                        --restart=always \
+                        --detach \
+                        --memory="256m" \
+                        --ulimit nofile=65536:65536 \
+                        -e REGION=${AWS::Region} \
+                        -e STREAM_NAME=${KlekStream} \
+                        -e BUFFER_CHUNK_LIMIT="2M" \
+                        -e BUFFER_QUEUE_LIMIT="128" \
+                        -e FLUSH_INTERVAL="15s" \
+                        -p 24224 -p 24220 -p 24230 \
+                        -v /var/log/fluentd:/fluentd/log \
+                        ${RedbookImageRepository}/fluentd-kinesis:0.0.1
+                      sleep 5
+                      status && touch $lockfile
+                    }
+
+                    stop() {
+                      echo "Trying to kill fluentd-kinesis container if it is running..."
+                      /usr/bin/docker stop fluentd-kinesis || true
+                      /usr/bin/docker rm fluentd-kinesis || true
+                      sleep 1
+                      status || rm -f $lockfile
+                    }
+
+                    status() {
+                      local count=$(/usr/bin/docker ps --filter name=fluentd-kinesis -q | wc -l)
+                      local desired=1
+                      if [ $count -lt $desired ]; then
+                          echo "Monitoring services failed to start"
+                          return 2
+                      fi
+                      echo "Monitoring services are up and running!"
+                      return 0
+                    }
+
+                    case "$1" in
+                      start)
+                        stop
+                        start
+                        ;;
+                      stop)
+                        stop
+                        ;;
+                      restart)
+                        stop
+                        start
+                        ;;
+                      status)
+                        status
+                        exit $?
+                        ;;
+                      *)
+                        echo $"Usage: $0 {start|stop|status|restart}"
+                        exit 4
+                    esac
+                  path: /etc/init.d/monitoring-services
+                  owner: root:root
+                  permissions: '0755'
+
+              yum_repos:
+                newrelic:
+                  name: NewRelicAgent
+                  baseurl: https://yum.newrelic.com/pub/newrelic/el5/$basearch
+                  enabled: true
+                  gpgcheck: false
+                  repo_gpgcheck: false
+                  sslverify: false
+                  ssl_check_cert_permissions: false
+              packages:
+                - aws-cli
+                - newrelic-sysmond
+                - aws-cfn-bootstrap
+              runcmd:
+
+                # Force an update of packages for security purposes
+                - yum update -y --security
+
+                # Install the SSM Agent for run-command capability
+                - yum install -y https://s3-${AWS::Region}.amazonaws.com/amazon-ssm-${AWS::Region}/latest/linux_amd64/amazon-ssm-agent.rpm
+                - start amazon-ssm-agent
+
+                # Ensure hostname is resolvable (fixes Burrito issue)
+                - echo -e "127.0.0.1\t$(hostname)" >> /etc/hosts
+
+                # Configure Artifactory Creds
+                - echo "${DockerRegistryAuth}" | base64 -d >/etc/ecs/dockerauth.enc
+                - aws --region ${AWS::Region} kms decrypt --ciphertext-blob fileb:///etc/ecs/dockerauth.enc --query Plaintext --output text | base64 -d > /etc/ecs/dockerauth
+                - echo ECS_ENGINE_AUTH_DATA=$(cat /etc/ecs/dockerauth) >>/etc/ecs/ecs.config
+                - mkdir -p /root/.docker
+                - chmod 0700 /root/.docker
+                - echo "{\"auths\":$(cat /etc/ecs/dockerauth)}" > /root/.docker/config.json
+                - chmod 0600 /root/.docker/config.json
+
+                # Start the FluentD and ECS Services
+                - service docker restart
+                - chkconfig --add monitoring-services
+                - chkconfig monitoring-services on
+                - service monitoring-services start
+                - stop ecs
+                - start ecs
+                - /etc/init.d/newrelic-sysmond start
+
+                # Let Cloudformation know that the instance has completed startup successfully
+                - /opt/aws/bin/cfn-signal --success 'true' --stack ${AWS::StackName} --resource OMTEcsAutoScalingGroup --region ${AWS::Region}
+
+            - {
+              KlekStream: !ImportValue ElasticSearchDeliveryStreamName
+              }
+
+  OMTEcsAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MaxBatchSize: 1
+        MinInstancesInService: 0
+        MinSuccessfulInstancesPercent: 100
+        PauseTime: PT15M
+        SuspendProcesses:
+          - HealthCheck
+          - ReplaceUnhealthy
+          - AZRebalance
+          - AlarmNotification
+          - ScheduledActions
+        WaitOnResourceSignals: true
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+    Properties:
+      LaunchConfigurationName: !Ref OMTEcsLaunchConfiguration
+      VPCZoneIdentifier: !Ref PrivateSubnets
+      MinSize: !Ref NumberOfClusterMembers
+      MaxSize: !Ref NumberOfClusterMembers
+      DesiredCapacity: !Ref NumberOfClusterMembers
+      Tags:
+        - Key: Name
+          Value: !Sub ${RuntimeEnvironment}-ECS-CLUSTER-${ClusterName}
+          PropagateAtLaunch: true
+        - Key: Schedule
+          Value: !Ref EcsClusterTagSchedule
+          PropagateAtLaunch: true
+        - Key: Application
+          Value: offermanagement
+          PropagateAtLaunch: true
+        - Key: Environment
+          Value: offermanagement
+          PropagateAtLaunch: true
+        - Key: Service
+          Value: offermanagement
+          PropagateAtLaunch: true
+        - Key: CostCentre
+          Value: redbook
+          PropagateAtLaunch: true
+        - Key: OwnerDescription
+          Value: luxbet-it-operations@luxbet.com
+          PropagateAtLaunch: true
+
+Outputs:
+  AutoscalingGroup:
+    Value: !Ref OMTEcsAutoScalingGroup

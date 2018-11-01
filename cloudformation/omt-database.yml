@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: Offer Management tool RDS Deployment Configuration
+
+Parameters:
+  PrivateSubnets:
+    Description: Private subnets for the ECS Cluster Autoscaling Group
+    Type: List<String>
+  OfficeDataCentreSG:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security Group for Office and Data Centre Access
+  OMTDbSize:
+    Default: 5
+    Type: Number
+    Description: The size of the OMT database
+    MinValue: 5
+    MaxValue: 6144
+    ConstraintDescription: Must be between 5 and 6144
+  OMTDbInstanceClass:
+    Type: String
+    Description: Instance class for the OMT RDS
+    AllowedValues:
+      - db.t2.small
+      - db.t2.medium
+      - db.t2.large
+      - db.m4.large
+      - db.m4.4xlarge
+      - db.r3.large
+      - db.r3.4xlarge
+    Default: db.t2.medium
+  OMTDbUsername:
+    Type: String
+    Description: OMT RDS database username
+  OMTDbPassword:
+    Type: String
+    NoEcho: true
+    Description: OMT RDS database password
+    MinLength: 8
+  RuntimeEnvironment:
+    Type: String
+    Description: The runtime environment config tag
+    Default: ppw
+  EcsClusterTagSchedule:
+    Type: String
+    Description: Availability schedule tag to configure on the ECS cluster members
+    Default: Start=07:00|mon-fri;Stop=20:00|mon-fri;Override=on
+  Route53ZoneDomain:
+    Description: Route53 Domain name for alias
+    Type: String
+  Route53LambdaFunctionArn:
+    Description: Route53 Lamda funciton service token
+    Type: String
+
+Resources:
+
+  OMTDBAlias:
+    Type: Custom::SharedServicesR53
+    Properties:
+      ZoneName: !Ref Route53ZoneDomain
+      ResourceRecordSet:
+        Type: CNAME
+        Name: !Sub ${RuntimeEnvironment}-db.${Route53ZoneDomain}
+        TTL: 600
+        ResourceRecords:
+          - Value: !GetAtt OMTMySQL.Endpoint.Address
+      ServiceToken: !Ref Route53LambdaFunctionArn
+
+  OMTMySQLSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: DB subnets for OMT
+      SubnetIds: !Ref PrivateSubnets
+
+  OMTMySQLParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: DB parameters for OMT
+      Family: mysql5.6
+      Parameters:
+        event_scheduler: 'ON'
+
+  OMTMySQL:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: offermanagement
+      AllocatedStorage: !Ref OMTDbSize
+      DBInstanceClass: !Ref OMTDbInstanceClass
+      Engine: mysql
+      EngineVersion: 5.6
+      MasterUsername: !Ref OMTDbUsername
+      MasterUserPassword: !Ref OMTDbPassword
+      DBSubnetGroupName: !Ref OMTMySQLSubnetGroup
+      DBParameterGroupName: !Ref OMTMySQLParameterGroup
+      Port: 3306
+      VPCSecurityGroups:
+        - Fn::ImportValue:
+            !Sub ${RuntimeEnvironment}-OMTDatabaseSG
+        - !Ref OfficeDataCentreSG
+      Tags:
+        - Key: Name
+          Value: !Sub ${RuntimeEnvironment}-OMTDB
+
+        # The horror - tag format is slightly different for RDS, so we just have to transform here
+        - Key: Schedule
+          Value: !Join [ '/', !Split [ ';', !Join [ '_', !Split [ '|', !Ref EcsClusterTagSchedule ] ] ] ]
+
+        - Key: Application
+          Value: OMT
+        - Key: Environment
+          Value: development
+        - Key: Service
+          Value: OMT
+        - Key: CostCentre
+          Value: redbook
+        - Key: OwnerDescription
+          Value: luxbet-it-operations@luxbet.com
+
+Outputs:
+  MySQLEndpoint:
+    Value: !GetAtt OMTMySQL.Endpoint.Address

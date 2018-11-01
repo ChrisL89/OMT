@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: Shared network configuration for OMT Cloudformation Stacks (Security Groups, Load Balancers)
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to deploy the OMT Stack into
+  RuntimeEnvironment:
+    Type: String
+    Description: The runtime environment config tag
+    Default: ppw
+  OfficeDataCentreSG:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security Group for Office and Data Centre Access
+  DigitalSG:
+    Type: String
+    Description: Security group for digital to access OMT
+  PrivateSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnets
+    ConstraintDescription : must be a list of valid subnets for the selected Virtual Private Cloud
+  SSLCertificateARN:
+    Type: String
+    Description: ARN For SSL Certificate used on WP Load Balancer
+  InternalLoadBalancerSubnets:
+    Description: Private subnets for the ECS Cluster Autoscaling Group
+    Type: List<AWS::EC2::Subnet::Id>
+  Route53ZoneDomain:
+    Description: Route53 Domain name for alias
+    Type: String
+    Default: luxaws.com
+  Route53LambdaFunctionArn:
+    Description: Route53 Lamda funciton service token
+    Type: String
+
+Resources:
+  OMTApiAlias:
+    Type: Custom::SharedServicesR53
+    Properties:
+      ZoneName: !Ref Route53ZoneDomain
+      ResourceRecordSet:
+        Type: CNAME
+        Name: !Sub ${RuntimeEnvironment}-api.${Route53ZoneDomain}
+        TTL: 600
+        ResourceRecords:
+          - Value: !GetAtt InternalLoadBalancer.DNSName
+      ServiceToken: !Ref Route53LambdaFunctionArn
+  OMTEcsClusterSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Permit traffic from ALB to cluster
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 32768
+          ToPort: 61000
+          SourceSecurityGroupId: !Ref InternalLoadBalancerSG
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 10.0.0.0/8
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${RuntimeEnvironment}-omt-cluster-sg
+
+  OMTDatabaseSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for the OMT Database
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref OMTEcsClusterSG
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 10.0.0.0/8
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${RuntimeEnvironment}-omt-database-sg
+
+  InternalLoadBalancerSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for the RGS and WagerPlayer IGP internal access
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          SourceSecurityGroupId: !Ref DigitalSG
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 10.0.0.0/8
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: ${RuntimeEnvironment}-internal-load-balancer-sg
+
+  InternalLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internal
+      SecurityGroups:
+        - !Ref InternalLoadBalancerSG
+        - !Ref OfficeDataCentreSG
+      Subnets: !Ref InternalLoadBalancerSubnets
+
+  InternalcLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref InternalLoadBalancer
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-2016-08
+      Port: 443
+      Certificates:
+        - CertificateArn: !Ref SSLCertificateARN
+      DefaultActions:
+        - TargetGroupArn: !Ref OMTTargetGroup
+          Type: forward
+
+  InternalcLoadBalancerHttpListener:
+      Type: AWS::ElasticLoadBalancingV2::Listener
+      Properties:
+        LoadBalancerArn: !Ref InternalLoadBalancer
+        Protocol: HTTP
+        Port: 80
+        DefaultActions:
+          - TargetGroupArn: !Ref OMTTargetGroup
+            Type: forward
+
+  PrivateRedisLoadBalancerSG:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Security Group for the RGS and WagerPlayer IGP internal access
+        VpcId: !Ref VpcId
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 6379
+            ToPort: 6379
+            CidrIp: 10.0.0.0/8
+        Tags:
+          - Key: Name
+            Value:
+              Fn::Sub: ${RuntimeEnvironment}-private-redis-load-balancer-sg
+
+  PrivateRedisLoadBalancer:
+    Type: AWS::ElasticLoadBalancing::LoadBalancer
+    Properties:
+      Scheme: internal
+      Subnets: !Ref InternalLoadBalancerSubnets
+      Listeners:
+        - InstanceProtocol: TCP
+          InstancePort: 6379
+          LoadBalancerPort: 6379
+          Protocol: TCP
+      SecurityGroups:
+        - !Ref PrivateRedisLoadBalancerSG
+
+
+  OMTEcsClusterSGWhitelistSelf:
+      Type: AWS::EC2::SecurityGroupIngress
+      Properties:
+        GroupId: !GetAtt OMTEcsClusterSG.GroupId
+        IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+        SourceSecurityGroupId: !Ref OMTEcsClusterSG
+
+  OMTTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: 8080
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: 200
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 120
+      HealthCheckPath: /
+      HealthCheckTimeoutSeconds: 15
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 10
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
+
+Outputs:
+  OMTDatabaseSG:
+    Value: !Ref OMTDatabaseSG
+    Export:
+      Name: !Sub ${RuntimeEnvironment}-OMTDatabaseSG
+  OMTEcsClusterSG:
+    Value: !Ref OMTEcsClusterSG
+    Export:
+      Name: !Sub ${RuntimeEnvironment}-OMTEcsClusterSG
+  OMTTargetGroup:
+    Value: !Ref OMTTargetGroup
+  OMTRedisHost:
+    Value: !GetAtt PrivateRedisLoadBalancer.DNSName
+  PrivateRedisLoadBalancer:
+      Value: !Ref PrivateRedisLoadBalancer

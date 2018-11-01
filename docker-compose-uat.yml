@@ -1,0 +1,34 @@
+version: '3'
+services:
+
+    db:
+         image: mysql:latest
+         restart: always
+         volumes:
+            - "./.data/db:/var/lib/mysql"
+         environment:
+            MYSQL_ROOT_PASSWORD: "password"
+            MYSQL_DATABASE: "offermanagement"
+            MYSQL_USER: "admin"
+            MYSQL_PASSWORD: "password"
+
+    phpmyadmin:
+         image: phpmyadmin/phpmyadmin
+         ports:
+            - "8181:80"
+         environment:
+            PMA_HOST: "db"
+    redis:
+         image: redis:3-alpine
+         ports:
+            - "6379:6379"
+
+    api-service:
+         image: offer-management:latest
+         ports:
+            - "8182:8080"
+         environment:
+            DATABASE_HOST: "db"
+            DATABASE_USER: "admin"
+            DATABASE_PASSWORD: "password"
+            SPRING_PROFILES_ACTIVE: "uat"

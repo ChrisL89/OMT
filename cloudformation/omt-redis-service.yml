@@ -1,0 +1,66 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: ECS Service and Task Definition for OMT Node
+
+Parameters:
+  RuntimeEnvironment:
+    Type: String
+    Description: Unique identifier for the deployment
+  EcsServiceRole:
+    Type: String
+    Description: The IAM role that the docker containers will use
+  RedbookImageRepository:
+    Type: String
+    Description: The repository to fetch the docker images from
+  OMTRedisDockerImageAndTag:
+    Type: String
+    Description: The image to fetch
+  NumberOfOMTRedisNodes:
+    Type: Number
+    Description: The number of OMT nodes to creates as part of the cluster
+  PrivateRedisLoadBalancer:
+      Type: String
+      Description: Private Redis Load Balancer Name
+
+Resources:
+  OMTRedisLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+
+  OMTRedisTask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      NetworkMode: host
+      ContainerDefinitions:
+        - Name: OMTRedis
+          Image: !Sub ${RedbookImageRepository}/${OMTRedisDockerImageAndTag}
+          Memory: 1024
+          Essential: true
+          PortMappings:
+            - ContainerPort: 6379
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref OMTRedisLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: offer-management-redis
+          Environment:
+            - Name: PLACEHOLDER
+              Value: !Ref AWS::NoValue
+
+  OMTService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: OMT-REDIS1 #this service name needs to be changed to update this resource
+      TaskDefinition: !Ref OMTRedisTask
+      DesiredCount: !Ref NumberOfOMTRedisNodes
+      DeploymentConfiguration:
+        MaximumPercent: 150
+        MinimumHealthyPercent: 100
+      Cluster: !Sub ${RuntimeEnvironment}-OMTEcsClusterStatic
+      Role: !Ref EcsServiceRole
+      LoadBalancers:
+        - LoadBalancerName: !Ref PrivateRedisLoadBalancer
+          ContainerPort: 6379
+          ContainerName: OMTRedis
